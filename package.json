@@ -1,0 +1,22 @@
+{
+  "name": "lush-server",
+  "version": "1.0.0",
+  "description": "Lush server",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon index.js"
+  },
+  "keywords": [
+    "lush",
+    "server",
+    "backend"
+  ],
+  "author": "Demid E.V.",
+  "license": "ISC",
+  "devDependencies": {
+    "dotenv": "^16.0.0",
+    "express": "^4.17.3",
+    "mysql2": "^2.3.3",
+    "request": "^2.88.2"
+  }
+}
