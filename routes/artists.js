@@ -7,322 +7,152 @@ const {
   setGenre,
   escapeMySQLString,
   getAlbums,
-  getArtists,
   insertArtistImage,
   insertImageArtistRelation,
 } = require("../general.js");
 
-router.post("/artistsForDropdown", async function (req, res) {
-  console.log("Body:", req.body);
-
-  const artistName = req.body.artistName;
-  const orderBy = req.body.orderBy;
-  const result = await getArtists({ artistName: artistName, orderBy: orderBy });
-  const status = result.error || 200;
-  const artists = result.data?.map((artist) => ({ ...artist })) || [];
-
-  const resJSON = {
-    status: status,
-    artists: artists,
-  };
-
-  res.send(resJSON);
-});
-
-router.post("/artistsData", async (req, res) => {
+router.get("/artists", async (req, res) => {
   // console.log("Body:", req.body);
 
-  const dataRequest = req.body;
-  const result = await getArtistsData(dataRequest);
+  const result = await getArtists(req.query);
 
-  const status = result.error || 200;
-  var artists = result.data?.map((artist) => ({ ...artist })) || [];
-  artists = artistsGroupBy(artists, "artist_id");
-  artists = Array.from(artists.values());
-  artists.forEach((artist) => {
-    artist.genres = Object.values(artist.genres);
-    artist.genres.sort((a, b) => a.genre_position - b.genre_position);
-  });
-
-  const artistData = {
-    status: status,
-    artists: artists,
-  };
-
-  res.send(artistData);
-});
-
-router.post("/artistData", async (req, res) => {
-  const dataRequest = req.body;
-  const result = await getArtistData(dataRequest);
-
-  const status = result.error || 200;
-  var artists = result.data?.map((artist) => ({ ...artist })) || [];
-  artists = artistsGroupBy(artists, "artist_id");
-  artists = Array.from(artists.values());
-  artists.forEach((artist) => {
-    artist.genres = Object.values(artist.genres);
-    artist.genres.sort((a, b) => a.genre_position - b.genre_position);
-  });
-
-  const artistData = {
-    status: status,
-    artists: artists,
-  };
-
-  res.send(artistData);
-});
-
-router.post("/imageBlob", async (req, res) => {
-  const blobId = req.body.blobId;
-  const audioData = await fetchImageBlob(blobId);
-
-  res.write(audioData.blob);
-  res.end();
-});
-
-async function insertArtistImageBlob(image) {
-  const query = `
-  INSERT INTO artistimage_blob SET ?
-  `,
-    values = {
-      image: image,
-    };
-
-  return await resolveQuery(query, values);
-}
-
-router.get("/getAlbums", async (req, res) => {
-  const artistId = req.body.artistId;
-
-  const albumsData = await getAlbums(artistId);
-
-  res.send(albumsData);
-});
-
-async function insertArtistImageData(imageId) {
-  const query = `
-  INSERT INTO artistimage_b(image_id) 
-  VALUES("${imageId}")
-  ;`;
-
-  return await resolveQuery(query);
-}
-
-async function insertImageArtist(imageId, artistId) {
-  const query = `
-  INSERT INTO image_artist_b(image_id, artist_id) 
-  VALUES(${imageId}, ${artistId})
-  ;`;
-
-  return await resolveQuery(query);
-}
-
-async function getArtistsData({ artistId, search, shuffle, limit, offset }) {
-  var artistIdWhereClause = "",
-    queryWhereClauses = [],
-    subquery = "",
-    subqueryWhereClauses = [],
-    searchQuery = "";
-
-  const whereClauseDeleted = "artist.deleted = 0";
-  queryWhereClauses.push(whereClauseDeleted);
-  subqueryWhereClauses.push(whereClauseDeleted);
-
-  if (search) {
-    searchQuery = `
-    (
-      artist.name COLLATE utf8mb4_0900_ai_ci LIKE "%${search}%"
-    )`;
-
-    queryWhereClauses.push(searchQuery);
-    subqueryWhereClauses.push(searchQuery);
-  }
-
-  var orderBy;
-  if (shuffle) {
-    orderBy = "RAND()";
-  } else if (artistId) {
-    artistIdWhereClause = `
-    artist.id = ${artistId}
-    `;
-
-    queryWhereClauses.push(artistIdWhereClause);
-    subqueryWhereClauses.push(artistIdWhereClause);
-
-    orderBy = "artist.id DESC";
-  } else {
-    const subqueryWhereClause = constructWhereClause(subqueryWhereClauses);
-
-    subquery = `
-    artist.id <= 
-    (
-      SELECT artist.id 
-      FROM artist 
-      ${subqueryWhereClause}
-      ORDER BY artist.id DESC
-      LIMIT 1 OFFSET ${offset}
-    )`;
-
-    queryWhereClauses.push(subquery);
-
-    orderBy = "artist.id DESC";
-  }
-
-  const queryWhereClause = constructWhereClause(queryWhereClauses);
-
-  const query = `
-  SELECT artist.id AS artist_id, artist.name AS artist_name, 
-  artistimage_b.image_id AS artist_image_id, artistimage_b.r, artistimage_b.g, artistimage_b.b, 
-  domain.id AS artist_domain_id, domain.name AS artist_domain_name, genre.id AS genre_id, genre.name AS genre_name
-  FROM (
-    SELECT artist.id, name
-    FROM artist
-    ${queryWhereClause}
-    ORDER BY ${orderBy}
-    LIMIT ${limit}
-    ) artist
- 
-  LEFT JOIN image_artist_b
-  ON artist.id = image_artist_b.artist_id
-  AND is_cover = 1
-  LEFT JOIN artistimage_b
-  ON artistimage_b.id = image_artist_b.image_id
-  LEFT JOIN domain
-  ON artistimage_b.domain_id = domain.id
-  
-  LEFT JOIN audio_artist 
-  ON artist.id = audio_artist.artist_id
-  LEFT JOIN audio 
-  ON audio_artist.audio_id = audio.id
-  
-  LEFT JOIN audio_genre 
-  ON audio.id = audio_genre.audio_id
-  LEFT JOIN genre 
-  ON audio_genre.genre_id = genre.id
-  ;`;
-
-  // console.log(query);
-
-  return await resolveQuery(query);
-}
-
-async function getArtistData({ artistId, search, shuffle }) {
-  var artistIdWhereClause = "",
-    queryWhereClauses = [],
-    subquery = "",
-    subqueryWhereClauses = [],
-    searchQuery = "";
-
-  const whereClauseDeleted = "artist.deleted = 0";
-  queryWhereClauses.push(whereClauseDeleted);
-  subqueryWhereClauses.push(whereClauseDeleted);
-
-  if (search) {
-    searchQuery = `
-    (
-      artist.name COLLATE utf8mb4_0900_ai_ci LIKE "%${search}%"
-    )`;
-
-    queryWhereClauses.push(searchQuery);
-    subqueryWhereClauses.push(searchQuery);
-  }
-
-  var orderBy;
-  if (shuffle) {
-    orderBy = "RAND()";
-  } else if (artistId) {
-    artistIdWhereClause = `
-    artist.id = ${artistId}
-    `;
-
-    queryWhereClauses.push(artistIdWhereClause);
-
-    orderBy = "artist.id DESC";
-  } else {
-    const subqueryWhereClause = constructWhereClause(subqueryWhereClauses);
-
-    subquery = `
-    artist.id <= 
-    (
-      SELECT artist.id 
-      FROM artist 
-      ${subqueryWhereClause}
-      ORDER BY artist.id DESC
-      LIMIT 1
-    )`;
-
-    queryWhereClauses.push(subquery);
-
-    orderBy = "artist.id DESC";
-  }
-
-  const queryWhereClause = constructWhereClause(queryWhereClauses);
-
-  const query = `
-  SELECT artist.id AS artist_id, artist.name AS artist_name, 
-  artistimage_b.image_id AS artist_image_id, artistimage_b.r, artistimage_b.g, artistimage_b.b, 
-  domain.id AS artist_domain_id, domain.name AS artist_domain_name, genre_top.genre_id AS genre_id, genre_top.genre_name AS genre_name
-  FROM (
-    SELECT id, name
-    FROM artist
-    ${queryWhereClause}
-    ORDER BY ${orderBy}
-    LIMIT 1
-    ) AS artist
- 
-  LEFT JOIN image_artist_b
-  ON artist.id = image_artist_b.artist_id
-  AND is_cover = 1
-  LEFT JOIN artistimage_b
-  ON artistimage_b.id = image_artist_b.image_id
-  LEFT JOIN domain
-  ON artistimage_b.domain_id = domain.id
-  
-  LEFT JOIN (
-	  SELECT artist.id AS artist_id, genre.id AS genre_id, genre.name AS genre_name, COUNT(genre.id) AS genre_count
-	  FROM artist
-      LEFT JOIN audio_artist
-      ON artist.id = audio_artist.artist_id
-      AND artist.id = ${artistId}
-      LEFT JOIN audio
-      ON audio_artist.audio_id = audio.id
-      LEFT JOIN audio_genre
-	  ON audio.id = audio_genre.audio_id
-      LEFT JOIN genre
-      ON audio_genre.genre_id = genre.id
-      
-      GROUP BY genre.id
-      ORDER BY genre_count DESC
-      LIMIT 5
-  ) AS genre_top
-  ON artist.id = genre_top.artist_id
-  ;`;
-
-  // console.log(query);
-
-  return await resolveQuery(query);
-}
-
-async function fetchImageBlob(blobId) {
-  const result = await getArtistImageBlob(blobId);
-  const audioData = {
+  const artists = {
     status: result.error || 200,
-    blob: result.data[0]?.image || new Buffer.from("", "base64"),
+    artists: result.data,
   };
 
-  return audioData;
+  res.send(artists);
+});
+
+async function getArtists({ artistId, search, shuffle, limit, offset }) {
+  if (search == null) {
+    search = "";
+  }
+
+  const query = `
+  CALL get_artists(${limit}, ${offset}, "${search}")
+  `;
+
+  return resolveQuery(query);
 }
 
-async function getArtistImageBlob(blobId) {
+router.get("/artist", async (req, res) => {
+  // console.log("Body:", req.query);
+
+  const result = await getArtist(req.query.artistId);
+
+  const artist = {
+    status: result.error || 200,
+    artist: result.data[0][0],
+  };
+
+  res.send(artist);
+});
+
+async function getArtist(artistId) {
   const query = `
-  SELECT image
-  FROM artistimage_blob
-  WHERE id = ${blobId}
+  CALL get_artist(${artistId})
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
+
+// async function getArtistData({ artistId, search, shuffle }) {
+//   var artistIdWhereClause = "",
+//     queryWhereClauses = [],
+//     subquery = "",
+//     subqueryWhereClauses = [],
+//     searchQuery = "";
+
+//   const whereClauseDeleted = "artist.deleted = 0";
+//   queryWhereClauses.push(whereClauseDeleted);
+//   subqueryWhereClauses.push(whereClauseDeleted);
+
+//   if (search) {
+//     searchQuery = `
+//     (
+//       artist.name COLLATE utf8mb4_0900_ai_ci LIKE "%${search}%"
+//     )`;
+
+//     queryWhereClauses.push(searchQuery);
+//     subqueryWhereClauses.push(searchQuery);
+//   }
+
+//   var orderBy;
+//   if (shuffle) {
+//     orderBy = "RAND()";
+//   } else if (artistId) {
+//     artistIdWhereClause = `
+//     artist.id = ${artistId}
+//     `;
+
+//     queryWhereClauses.push(artistIdWhereClause);
+
+//     orderBy = "artist.id DESC";
+//   } else {
+//     const subqueryWhereClause = constructWhereClause(subqueryWhereClauses);
+
+//     subquery = `
+//     artist.id <=
+//     (
+//       SELECT artist.id
+//       FROM artist
+//       ${subqueryWhereClause}
+//       ORDER BY artist.id DESC
+//       LIMIT 1
+//     )`;
+
+//     queryWhereClauses.push(subquery);
+
+//     orderBy = "artist.id DESC";
+//   }
+
+//   const queryWhereClause = constructWhereClause(queryWhereClauses);
+
+//   const query = `
+//   SELECT artist.id AS artist_id, artist.name AS artist_name,
+//   artistimage_b.image_id AS artist_image_id, artistimage_b.r, artistimage_b.g, artistimage_b.b,
+//   domain.id AS artist_domain_id, domain.name AS artist_domain_name, genre_top.genre_id AS genre_id, genre_top.genre_name AS genre_name
+//   FROM (
+//     SELECT id, name
+//     FROM artist
+//     ${queryWhereClause}
+//     ORDER BY ${orderBy}
+//     LIMIT 1
+//     ) AS artist
+
+//   LEFT JOIN image_artist_b
+//   ON artist.id = image_artist_b.artist_id
+//   AND is_cover = 1
+//   LEFT JOIN artistimage_b
+//   ON artistimage_b.id = image_artist_b.image_id
+//   LEFT JOIN domain
+//   ON artistimage_b.domain_id = domain.id
+
+//   LEFT JOIN (
+// 	  SELECT artist.id AS artist_id, genre.id AS genre_id, genre.name AS genre_name, COUNT(genre.id) AS genre_count
+// 	  FROM artist
+//       LEFT JOIN audio_artist
+//       ON artist.id = audio_artist.artist_id
+//       AND artist.id = ${artistId}
+//       LEFT JOIN audio
+//       ON audio_artist.audio_id = audio.id
+//       LEFT JOIN audio_genre
+// 	  ON audio.id = audio_genre.audio_id
+//       LEFT JOIN genre
+//       ON audio_genre.genre_id = genre.id
+
+//       GROUP BY genre.id
+//       ORDER BY genre_count DESC
+//       LIMIT 5
+//   ) AS genre_top
+//   ON artist.id = genre_top.artist_id
+//   ;`;
+
+//   // console.log(query);
+
+//   return await resolveQuery(query);
+// }
 
 router.post("/submitArtist", async function (req, res) {
   const artistMetadata = JSON.parse(req.body.artistMetadata);
@@ -365,6 +195,7 @@ router.post("/submitArtist", async function (req, res) {
 
 router.post("/insertNewArtist", async function (req, res) {
   console.log(req.body);
+
   const artistId =
     (await getArtistByName(req.body.artistName)).data[0]?.id ||
     (await insertArtist(req.body)).data.insertId;
@@ -380,7 +211,7 @@ async function getArtistByName(artistName) {
   "${escapeMySQLString(artistName)}"
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
 async function deleteAudioGenreRelations(artistId) {

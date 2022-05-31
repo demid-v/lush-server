@@ -3,7 +3,6 @@ const router = require("express").Router();
 const {
   resolveQuery,
   constructWhereClause,
-  audiosGroupBy,
   findGenre,
   deleteAudioGenreRelations,
   escapeMySQLString,
@@ -12,14 +11,62 @@ const {
   getAlbum,
 } = require("../general.js");
 
-router.post("/audiosData", async function (req, res) {
-  console.log("Body:", req.body);
+router.get("/tracks", async function (req, res) {
+  console.log("Body:", req.query);
 
-  const dataRequest = req.body;
-  const audioData = await fetchAudioData(dataRequest);
+  const result = await getTracks(req.query);
 
-  res.send(audioData);
+  const tracks = {
+    status: result.error || 200,
+    tracks: result.data,
+  };
+
+  res.send(tracks);
 });
+
+async function getTracks({ search, genres, shuffle, limit, offset }) {
+  if (search == null) {
+    search = "";
+  }
+
+  const query = `
+  CALL get_tracks(${limit}, ${offset}, "${search}")
+  ;`;
+
+  return resolveQuery(query);
+}
+
+router.get("/artistTracks", async function (req, res) {
+  console.log("Body:", req.query);
+
+  const result = await getArtistTracks(req.query);
+
+  const tracks = {
+    status: result.error || 200,
+    tracks: result.data,
+  };
+
+  res.send(tracks);
+});
+
+async function getArtistTracks({
+  artistId,
+  search,
+  genres,
+  shuffle,
+  limit,
+  offset,
+}) {
+  if (search == null) {
+    search = "";
+  }
+
+  const query = `
+  CALL get_tracks_for_artist(${artistId}, ${limit}, ${offset}, "${search}")
+  ;`;
+
+  return resolveQuery(query);
+}
 
 router.patch("/editAudio", async function (req, res) {
   console.log("Body:", req.body);
@@ -32,14 +79,14 @@ router.patch("/editAudio", async function (req, res) {
   await deleteAudioArtistRelations(audioId);
   artists.forEach(async (artistId, index) => {
     if (artistId !== undefined) {
-      await insertAudioArtistRelation(audioId, artistId, index + 1);
+      await insertTrackArtistRelation(audioId, artistId, index + 1);
     }
   });
 
   await deleteAudioGenreRelations(audioId);
   genres.forEach(async (genreId, index) => {
     if (genreId !== undefined) {
-      await insertAudioGenreRelations(audioId, genreId, index + 1);
+      await insertTrackGenreRelations(audioId, genreId, index + 1);
     }
   });
 
@@ -96,277 +143,28 @@ async function deleteAudioArtistRelations(audioId) {
   return await resolveQuery(query);
 }
 
-async function insertAudioArtistRelation(audioId, artistId, artistPosition) {
+async function insertTrackArtistRelation(trackId, artistId, artistPosition) {
   const query = `
-  INSERT INTO audio_artist(audio_id, artist_id, artist_position) 
-  VALUES(${audioId}, ${artistId}, ${artistPosition})
+  INSERT INTO track_artist_rel(track_id, artist_id, artist_position) 
+  VALUES(${trackId}, ${artistId}, ${artistPosition})
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
-async function insertAudioGenreRelations(audioId, genreId, genrePosition) {
+async function insertTrackGenreRelations(trackId, genreId, genrePosition) {
   const query = `
-  INSERT INTO audio_genre(audio_id, genre_id, genre_position) 
-  VALUES(${audioId}, ${genreId}, ${genrePosition})
+  INSERT INTO track_genre_rel(track_id, genre_id, genre_position) 
+  VALUES(${trackId}, ${genreId}, ${genrePosition})
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
-async function fetchAudioData(dataRequest) {
-  const result = await getAudioMetadata(dataRequest);
-
-  const status = result.error || 200;
-  var audios = result.data?.map((audio) => ({ ...audio })) || [];
-  audios = audiosGroupBy(audios, "audio_id");
-  audios = Array.from(audios.values());
-  audios.forEach((audio) => {
-    audio.artists = Object.values(audio.artists);
-    audio.artists.sort((a, b) => a.position - b.position);
-
-    audio.genres = Object.values(audio.genres);
-    audio.genres.sort((a, b) => a.position - b.position);
-  });
-
-  const audiosData = {
-    status: status,
-    audios: audios,
-  };
-
-  return audiosData;
-}
-
-async function getAudioMetadata({
-  artistId,
-  playlistId,
-  albumId,
-  search,
-  genres,
-  shuffle,
-  limit,
-  offset,
-}) {
-  const queryWhereClauses = [
-    // "audio.deleted = 0"
-  ];
-  const subqueryWhereClauses = [
-    // "audio.deleted = 0"
-  ];
-
-  // Should always set this censorship when presenting the project.
-  // const NSFWClause = "audio.nsfw = 0";
-  // subqueryWhereClauses.push(NSFWClause);
-
-  if (artistId) {
-    const artistIdWhereClause = `
-    artist.id = ${artistId}
-    `;
-
-    queryWhereClauses.push(artistIdWhereClause);
-    subqueryWhereClauses.push(artistIdWhereClause);
-  }
-
-  if (playlistId) {
-    const playlistIdWhereClause = `
-    playlist.id = ${playlistId}
-    `;
-
-    queryWhereClauses.push(playlistIdWhereClause);
-    subqueryWhereClauses.push(playlistIdWhereClause);
-  }
-
-  if (albumId) {
-    const albumIdWhereClause = `
-    album.id = ${albumId}
-    `;
-
-    queryWhereClauses.push(albumIdWhereClause);
-    subqueryWhereClauses.push(albumIdWhereClause);
-  }
-
-  if (search) {
-    const searchQuery = `
-      CONCAT(artist.name, " ", audio.title) COLLATE utf8mb4_0900_ai_ci LIKE "%${search}%"
-      `;
-    //   `
-    // (
-    //   audio.title COLLATE utf8mb4_0900_ai_ci LIKE "%${search}%"
-    //   OR artist.name COLLATE utf8mb4_0900_ai_ci LIKE "%${search}%"
-    // )
-    // `;
-
-    queryWhereClauses.push(searchQuery);
-    subqueryWhereClauses.push(searchQuery);
-  }
-
-  if (genres) {
-    const queryWhereClausesOr = [];
-    const subqueryWhereClausesOr = [];
-
-    genres.forEach((genre) => {
-      const genreQuery = `
-      genre.name COLLATE utf8mb4_0900_ai_ci = "${genre}"
-      `;
-      subqueryWhereClausesOr.push(genreQuery);
-      queryWhereClausesOr.push(genreQuery);
-    });
-
-    const genresSubquery = constructWhereClause(
-      subqueryWhereClausesOr,
-      "OR",
-      true
-    );
-    const genresQuery = constructWhereClause(queryWhereClausesOr, "OR", true);
-
-    subqueryWhereClauses.push(genresSubquery);
-    queryWhereClauses.push(genresQuery);
-  }
-
-  const queryWhereClause = constructWhereClause(queryWhereClauses);
-
-  let orderBy;
-  if (shuffle) {
-    orderBy = "RAND()";
-  } else if (playlistId) {
-    orderBy = "audio_playlist.audio_position";
-  } else if (albumId) {
-    orderBy = "audio_album.audio_position";
-  } else {
-    orderBy = "audio.id DESC";
-  }
-
-  if (!shuffle) {
-    const subquery = `
-    audio.id <= 
-      (
-        SELECT audio.id 
-        FROM audio 
-
-        LEFT JOIN audio_artist 
-        ON audio.id = audio_artist.audio_id
-        LEFT JOIN artist 
-        ON audio_artist.artist_id = artist.id
-        
-        LEFT JOIN audio_playlist 
-        ON audio.id = audio_playlist.audio_id
-        LEFT JOIN playlist 
-        ON audio_playlist.playlist_id = playlist.id
-        
-        LEFT JOIN audio_genre 
-        ON audio.id = audio_genre.audio_id
-        LEFT JOIN genre 
-        ON audio_genre.genre_id = genre.id        
-        AND genre.deleted = 0
-    
-        LEFT JOIN audio_album 
-        ON audio.id = audio_album.audio_id
-        LEFT JOIN album 
-        ON audio_album.album_id = album.id
-
-        ${queryWhereClause}
-        GROUP BY audio.id
-        ORDER BY audio.id DESC
-        LIMIT 1 OFFSET ${offset}
-      )
-    `;
-
-    subqueryWhereClauses.push(subquery);
-  }
-
-  const subqueryWhereClause = constructWhereClause(subqueryWhereClauses);
-
+async function insertTrackLanguageRelation(trackId, languageId) {
   const query = `
-  SELECT audio.id AS audio_id, blob_id, audio.title AS audio_title, artist.id AS artist_id, artist.name, 
-  artist_position, duration, audio.youtube_video_id, genre.id AS genre_id, genre.name AS genre_name, 
-  audio_genre.genre_position AS genre_position, artistimage_b.image_id, domain.id AS domain_id, domain.name AS domain_name,
-  album.id AS album_id, album.title AS album_title, albumimage.image_id AS album_image_id, album_domain.id AS album_domain_id, album_domain.name AS album_domain_name
-  FROM (
-    SELECT audio.id, blob_id, audio.title, duration, audio.youtube_video_id
-    FROM audio
-    
-    LEFT JOIN audio_artist 
-    ON audio.id = audio_artist.audio_id
-    LEFT JOIN artist 
-    ON audio_artist.artist_id = artist.id
-    
-    LEFT JOIN audio_playlist 
-    ON audio.id = audio_playlist.audio_id
-    LEFT JOIN playlist 
-    ON audio_playlist.playlist_id = playlist.id
-    
-    LEFT JOIN audio_genre 
-    ON audio.id = audio_genre.audio_id
-    LEFT JOIN genre 
-    ON audio_genre.genre_id = genre.id
-    AND genre.deleted = 0
-    
-    LEFT JOIN audio_album 
-    ON audio.id = audio_album.audio_id
-    LEFT JOIN album 
-    ON audio_album.album_id = album.id
-
-    ${subqueryWhereClause}
-    GROUP BY audio.id
-    ORDER BY ${orderBy}
-    LIMIT ${limit}
-    ) audio
-
-  LEFT JOIN audio_artist 
-  ON audio.id = audio_artist.audio_id
-  LEFT JOIN artist 
-  ON audio_artist.artist_id = artist.id
-  LEFT JOIN image_artist_b
-  ON artist.id = image_artist_b.artist_id
-  AND image_artist_b.is_cover = 1
-  LEFT JOIN artistimage_b
-  ON image_artist_b.image_id = artistimage_b.id
-  LEFT JOIN domain
-  ON artistimage_b.domain_id = domain.id
-
-  LEFT JOIN audio_playlist 
-  ON audio.id = audio_playlist.audio_id
-  LEFT JOIN playlist 
-  ON audio_playlist.playlist_id = playlist.id
-  
-  LEFT JOIN audio_genre 
-  ON audio.id = audio_genre.audio_id
-  LEFT JOIN genre 
-  ON audio_genre.genre_id = genre.id
-  AND genre.deleted = 0
-  
-  LEFT JOIN audio_album 
-  ON audio.id = audio_album.audio_id
-  LEFT JOIN album 
-  ON audio_album.album_id = album.id
-  LEFT JOIN image_album
-  ON album.id = image_album.album_id
-  AND image_album.is_cover = 1
-  LEFT JOIN albumimage
-  ON image_album.image_id = albumimage.id
-  LEFT JOIN domain AS album_domain
-  ON albumimage.domain_id = album_domain.id
-  ;`;
-
-  // console.log(query);
-
-  return await resolveQuery(query);
-}
-
-async function getAudio(audioId) {
-  const query = `
-  SELECT audio
-  FROM audio_blob
-  WHERE id = ${audioId}
-  ;`;
-
-  return await resolveQuery(query);
-}
-
-async function insertAudioLanguageRelation(audioId, languageId) {
-  const query = `
-  INSERT INTO audio_language(audio_id, language_id) 
-  VALUES(${audioId}, ${languageId})
+  INSERT INTO track_language_rel(track_id, language_id) 
+  VALUES(${trackId}, ${languageId})
   ;`;
 
   return await resolveQuery(query);
@@ -376,7 +174,7 @@ router.get("/randomAudio", async function (req, res, _next) {
   // console.log("Body:", req.body);
 
   const dataRequest = { shuffle: true, limit: 3 };
-  const result = await getAudioMetadata(dataRequest);
+  const result = await getTracks(dataRequest);
 
   const status = result.error || 200;
   var audiosData = result.data?.map((audio) => ({ ...audio })) || [];
@@ -396,18 +194,6 @@ router.get("/randomAudio", async function (req, res, _next) {
   };
 
   res.send(data);
-});
-
-router.post("/downloadAudios", async function (req, res) {
-  const blobId = req.body.blobId;
-  const result = await getAudio(blobId);
-  const audioData = {
-    status: result.error || 200,
-    blob: result.data[0].audio,
-  };
-
-  res.write(audioData.blob);
-  res.end();
 });
 
 const request = require("request");
@@ -463,18 +249,18 @@ router.post("/uploadAlbum", async function (req, res) {
     albumId = (await insertAlbum(albumTitle, releaseDate, mbid)).data.insertId;
 
     for (const [index, track] of tracks.entries()) {
-      var audioId = (await getAudioId(artistId, track.title)).data[0]?.id;
-      if (audioId === undefined) {
-        audioId = (
-          await insertPhantomAudioData(
+      var trackId = (await getTrackId(artistId, track.title)).data[0]?.id;
+      if (trackId === undefined) {
+        trackId = (
+          await insertTrackData(
             track.title,
             track.duration,
             track.mbid,
             track.videoId
           )
         ).data.insertId;
-        await insertAudioLanguageRelation(audioId, 1);
-        await insertAudioArtistRelation(audioId, artistId, 1);
+        await insertTrackLanguageRelation(trackId, 1);
+        await insertTrackArtistRelation(trackId, artistId, 1);
       }
 
       if (track.genres?.length > 0) {
@@ -482,10 +268,10 @@ router.post("/uploadAlbum", async function (req, res) {
           const genreId =
             (await findGenre(genre)).data[0]?.id ||
             (await insertGenre(genre, 1)).data?.insertId;
-          const audioGenreRel = (await getAudioGenreRelation(audioId, genreId))
+          const audioGenreRel = (await getTrackGenreRelation(trackId, genreId))
             .data;
           if (audioGenreRel?.length < 1) {
-            await insertAudioGenreRelations(audioId, genreId, index + 1);
+            await insertTrackGenreRelations(trackId, genreId, index + 1);
           }
         });
       } else if (genres?.length > 0) {
@@ -493,21 +279,21 @@ router.post("/uploadAlbum", async function (req, res) {
           const genreId =
             (await findGenre(genre)).data[0]?.id ||
             (await insertGenre(genre, 1)).data?.insertId;
-          const audioGenreRel = (await getAudioGenreRelation(audioId, genreId))
+          const audioGenreRel = (await getTrackGenreRelation(trackId, genreId))
             .data;
           if (audioGenreRel.length < 1) {
-            await insertAudioGenreRelations(audioId, genreId, index + 1);
+            await insertTrackGenreRelations(trackId, genreId, index + 1);
           }
         });
       }
 
-      await insertAudioAlbumRelation(audioId, albumId, index + 1);
+      await insertTrackAlbumRelation(trackId, albumId, index + 1);
     }
 
     if (albumCover.upload) {
       const imageId = (await insertAlbumImage(2, albumCover.id, albumCover.rgb))
         .data.insertId;
-      await insertImageAlbumRelation(imageId, albumId);
+      await insertAlbumImageRelation(imageId, albumId);
     }
 
     console.log(artistName, albumTitle);
@@ -532,26 +318,26 @@ router.post("/uploadAlbum", async function (req, res) {
 
 async function getArtistImageByName(imageId) {
   const query = `
-  SELECT artistimage_b.id
-  FROM artistimage_b, image_artist_b, artist
-  WHERE artistimage_b.id = image_artist_b.image_id
-  AND image_artist_b.artist_id = artist.id
-  AND artistimage_b.image_id = "${imageId}"
+  SELECT artist_image.id
+  FROM artist_image, artist_image_rel, artist
+  WHERE artist_image.id = artist_image_rel.image_id
+  AND artist_image_rel.artist_id = artist.id
+  AND artist_image.image_id = "${imageId}"
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
 async function getArtistImageByArtistId(artistId) {
   const query = `
-  SELECT artistimage_b.id
-  FROM artistimage_b, image_artist_b, artist
-  WHERE artistimage_b.id = image_artist_b.image_id
-  AND image_artist_b.artist_id = artist.id
+  SELECT artist_image.id
+  FROM artist_image, artist_image_rel, artist
+  WHERE artist_image.id = artist_image_rel.image_id
+  AND artist_image_rel.artist_id = artist.id
   AND artist.id = ${artistId}
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
 async function insertGenre(genre, deleted = 0) {
@@ -563,28 +349,28 @@ async function insertGenre(genre, deleted = 0) {
   return await resolveQuery(query);
 }
 
-async function getAudioGenreRelation(audioId, genreId) {
+async function getTrackGenreRelation(trackId, genreId) {
   const query = `
-  SELECT * FROM audio_genre
-  WHERE audio_id = ${audioId}
+  SELECT * FROM track_genre_rel
+  WHERE track_id = ${trackId}
   AND genre_id = ${genreId}
   ;`;
 
   return await resolveQuery(query);
 }
 
-async function getAudioId(artistId, audioTitle) {
+async function getTrackId(artistId, trackTitle) {
   const query = `
-  SELECT audio.id
-  FROM audio, artist, audio_artist
-  WHERE audio.id = audio_artist.audio_id
-  AND audio_artist.artist_id = artist.id
+  SELECT track.id
+  FROM track, artist, track_artist_rel
+  WHERE track.id = track_artist_rel.track_id
+  AND track_artist_rel.artist_id = artist.id
   AND artist.id = ${artistId}
-  AND audio.title COLLATE utf8mb4_0900_ai_ci = 
-  "${escapeMySQLString(audioTitle)}"
+  AND track.title COLLATE utf8mb4_0900_ai_ci = 
+  "${escapeMySQLString(trackTitle)}"
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
 async function insertAlbum(title, releaseDate, mbid) {
@@ -617,16 +403,16 @@ async function insertAlbum(title, releaseDate, mbid) {
   return await resolveQuery(query);
 }
 
-async function insertAudioAlbumRelation(audioId, albumId, audioPosition) {
+async function insertTrackAlbumRelation(trackId, albumId, trackPosition) {
   const query = `
-  INSERT INTO audio_album(audio_id, album_id, audio_position) 
-  VALUES(${audioId}, ${albumId}, ${audioPosition})
+  INSERT INTO track_album_rel(track_id, album_id, track_position) 
+  VALUES(${trackId}, ${albumId}, ${trackPosition})
   ;`;
 
   return await resolveQuery(query);
 }
 
-async function insertPhantomAudioData(title, duration, mbid, videoId) {
+async function insertTrackData(title, duration, mbid, videoId) {
   var params = "title";
   var values = `"${escapeMySQLString(title)}"`;
 
@@ -644,7 +430,7 @@ async function insertPhantomAudioData(title, duration, mbid, videoId) {
   }
 
   const query = `
-  INSERT INTO audio(${params}) 
+  INSERT INTO track(${params}) 
   VALUES(${values})
   ;`;
 
@@ -655,16 +441,16 @@ async function insertAlbumImage(domainId, imageId, rgb) {
   const { r, g, b } = rgb;
 
   const query = `
-  INSERT INTO albumimage(domain_id, image_id, r, g, b) 
+  INSERT INTO album_image(domain_id, image_id, r, g, b) 
   VALUES(${domainId}, "${imageId}", ${r}, ${g}, ${b})
   ;`;
 
   return await resolveQuery(query);
 }
 
-async function insertImageAlbumRelation(imageId, albumId) {
+async function insertAlbumImageRelation(imageId, albumId) {
   const query = `
-  INSERT INTO image_album(image_id, album_id) 
+  INSERT INTO album_image_rel(image_id, album_id) 
   VALUES(${imageId}, ${albumId})
   ;`;
 
@@ -684,92 +470,25 @@ router.get("/getYoutubeApiKey", (req, res) => {
 router.post("/insertNewTrack", async (req, res) => {
   const { artistId, trackTitle, duration, genres, mbid, videoId } = req.body;
 
-  var trackId = (await getAudioId(artistId, trackTitle)).data[0]?.id;
+  var trackId = (await getTrackId(artistId, trackTitle)).data[0]?.id;
   if (trackId === undefined) {
-    trackId = (
-      await insertPhantomAudioData(trackTitle, duration, mbid, videoId)
-    ).data.insertId;
-    await insertAudioLanguageRelation(trackId, 1);
-    await insertAudioArtistRelation(trackId, artistId, 1);
+    trackId = (await insertTrackData(trackTitle, duration, mbid, videoId)).data
+      .insertId;
+    await insertTrackLanguageRelation(trackId, 1);
+    await insertTrackArtistRelation(trackId, artistId, 1);
 
     genres?.forEach(async (genre, index) => {
       const genreId =
         (await findGenre(genre)).data[0]?.id ||
         (await insertGenre(genre, 1)).data?.insertId;
-      const audioGenreRel = (await getAudioGenreRelation(trackId, genreId))
+      const trackGenreRel = (await getTrackGenreRelation(trackId, genreId))
         .data;
-      if (audioGenreRel?.length < 1) {
-        await insertAudioGenreRelations(trackId, genreId, index + 1);
+      if (trackGenreRel?.length < 1) {
+        await insertTrackGenreRelations(trackId, genreId, index + 1);
       }
     });
   }
   res.status(200).send({ request: req.body, response: trackId });
 });
-
-router.post("/compareGenres", async (req, res) => {
-  const genres = req.body;
-  console.log(genres);
-  for (const genre of genres) {
-    console.log(genre);
-    await compareGenres(genre);
-  }
-
-  res.status(200).send({ response: "Done." });
-});
-
-async function compareGenres(genre) {
-  const query = `UPDATE genre SET deleted = 0 WHERE name COLLATE utf8mb4_0900_ai_ci = "${genre}";`;
-
-  return resolveQuery(query);
-}
-
-router.post("/getAudiosForUpdate", async function (req, res) {
-  const result = await getAudiosForUpdate(req.body);
-
-  res.status(200).send(result.data);
-});
-
-async function getAudiosForUpdate({ lastAudioId = 0 }) {
-  const query = `
-  SELECT *
-  FROM ( 
-    SELECT audio.id AS audio_id, audio.title AS audio_title, artist.name AS artist_name
-    FROM audio
-    LEFT JOIN audio_artist
-    ON audio.id = audio_artist.audio_id
-    LEFT JOIN artist
-    ON audio_artist.artist_id = artist.id
-    WHERE audio.id > 800 AND audio.id < 59574
-    ORDER BY audio.id, audio_artist.artist_position
-  ) AS audio_artist_joined
-  GROUP BY audio_artist_joined.audio_id
-  ;`;
-
-  return resolveQuery(query);
-}
-
-router.patch("/updateTrack", async function (req, res) {
-  await updateTrack(req.body);
-  console.log(req.body);
-
-  res.status(200).send(req.body);
-});
-
-async function updateTrack({ audioId, videoId, mbid }) {
-  const fieldsArr = [];
-  if (videoId !== undefined) {
-    fieldsArr.push(`youtube_video_id = "${videoId}"`);
-  }
-  if (mbid !== undefined) {
-    fieldsArr.push(`last_fm_mbid = "${mbid}"`);
-  }
-  const fields = fieldsArr.join(", ");
-
-  const query = `
-  UPDATE audio SET ${fields} WHERE audio.id = ${audioId}
-  ;`;
-
-  return resolveQuery(query);
-}
 
 module.exports = router;

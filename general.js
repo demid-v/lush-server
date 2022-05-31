@@ -29,53 +29,6 @@ function executeQuery(query, values) {
   });
 }
 
-const audiosGroupBy = function (xs, key) {
-  return xs.reduce(function (rv, x) {
-    if (!rv.has(x[key])) {
-      rv.set(x[key], { artists: {}, genres: {}, albums: {} });
-    }
-
-    rv.get(x[key]).audio_id = x.audio_id;
-    rv.get(x[key]).blob_id = x.blob_id;
-    rv.get(x[key]).audio_title = x.audio_title;
-    rv.get(x[key]).duration = x.duration;
-    rv.get(x[key]).youtubeVideoId = x.youtube_video_id;
-
-    rv.get(x[key]).artists[x.artist_id] = {
-      artist_id: x.artist_id,
-      name: x.name,
-      image_id: x.image_id,
-      domain_id: x.domain_id,
-      domain_name: x.domain_name,
-      position: x.artist_position,
-    };
-
-    if (x.genre_id) {
-      rv.get(x[key]).genres[x.genre_id] = {
-        genre_id: x.genre_id,
-        genre_name: x.genre_name,
-        position: x.genre_position,
-      };
-    }
-
-    if (x.album_id) {
-      rv.get(x[key]).albums[x.album_id] = {
-        album_id: x.album_id,
-        album_title: x.album_title,
-        album_domain_name: x.album_domain_name,
-        album_domain_id: x.album_domain_id,
-        album_image_id: x.album_image_id,
-        album_audio_count: x.album_audio_count,
-        album_release_day: x.album_release_day,
-        album_release_month: x.album_release_month,
-        album_release_year: x.album_release_year,
-      };
-    }
-
-    return rv;
-  }, new Map());
-};
-
 const artistsGroupBy = function (xs, key) {
   return xs.reduce(function (rv, x) {
     if (!rv.has(x[key])) {
@@ -130,7 +83,7 @@ async function insertArtist({ artistName, mbid }) {
   VALUES(${values})
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
 function constructWhereClause(whereClauses, conj = "AND", is_part) {
@@ -192,14 +145,14 @@ async function getAlbum(artistId, albumTitle) {
   const query = `
   SELECT album.id
   FROM album
-  INNER JOIN audio_album
-  ON audio_album.album_id = album.id
-	LEFT JOIN audio
-	ON audio_album.audio_id = audio.id
-  LEFT JOIN audio_artist
-  ON audio.id = audio_artist.audio_id
+  INNER JOIN track_album_rel
+  ON track_album_rel.album_id = album.id
+	LEFT JOIN track
+	ON track_album_rel.track_id = track.id
+  LEFT JOIN track_artist_rel
+  ON track.id = track_artist_rel.track_id
   LEFT JOIN artist
-  ON audio_artist.artist_id = artist.id
+  ON track_artist_rel.artist_id = artist.id
   ${whereClause}`;
 
   return await resolveQuery(query);
@@ -241,53 +194,30 @@ async function getAlbums(artistId, albumTitle) {
   return await resolveQuery(query);
 }
 
-async function getArtists({ artistName, orderBy = "DESC" } = {}) {
-  const whereClauses = ["deleted = 0"];
-  if (artistName) {
-    whereClauses.push(
-      `artist.name COLLATE utf8mb4_0900_ai_ci LIKE "%${escapeMySQLString(
-        artistName
-      )}%"`
-    );
-  }
-
-  const whereClause = constructWhereClause(whereClauses);
-
-  const query = `
-  SELECT id, name
-  FROM artist
-  ${whereClause}
-  ORDER BY id ${orderBy}
-  ;`;
-
-  return await resolveQuery(query);
-}
-
 async function insertArtistImage(domainId, imageId, rgb) {
   const { r, g, b } = rgb;
 
   const query = `
-  INSERT INTO artistimage_b(domain_id, image_id, r, g, b) 
+  INSERT INTO artist_image(domain_id, image_id, r, g, b) 
   VALUES(${domainId}, "${imageId}", ${r}, ${g}, ${b})
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
 async function insertImageArtistRelation(imageId, artistId, isCover) {
   if (isCover == null) isCover = 1;
 
   const query = `
-  INSERT INTO image_artist_b(image_id, artist_id, is_cover) 
+  INSERT INTO artist_image_rel(image_id, artist_id, is_cover) 
   VALUES(${imageId}, ${artistId}, ${isCover})
   ;`;
 
-  return await resolveQuery(query);
+  return resolveQuery(query);
 }
 
 module.exports = {
   resolveQuery,
-  audiosGroupBy,
   artistsGroupBy,
   insertArtist,
   constructWhereClause,
@@ -298,7 +228,6 @@ module.exports = {
   deleteAudioGenreRelations,
   getAlbums,
   getAlbum,
-  getArtists,
   insertArtistImage,
   insertImageArtistRelation,
 };
