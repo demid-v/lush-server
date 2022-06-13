@@ -2,15 +2,17 @@
   "name": "lush-server",
   "version": "1.0.0",
   "description": "Lush server",
-  "author": "Demid E.V.",
+  "author": "Demid Evgenyevich <vasilyev.demid.e@gmail.com>",
   "license": "ISC",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
     "start:dev": "nodemon index.js",
-    "docker:build": "docker-compose build",
-    "docker:compose": "docker-compose up",
-    "docker": "npm run docker:build && npm run docker:compose"
+    "start": "node index.js",
+    "docker-compose-build": "docker-compose build",
+    "docker-compose-up:dev": "docker-compose up",
+    "docker-compose-up": "docker-compose up --no-build",
+    "docker-compose:dev": "npm run docker-compose-build && npm run docker-compose-up:dev",
+    "docker-compose": "docker-compose pull && npm run docker-compose-up"
   },
   "devDependencies": {
     "dotenv": "^16.0.0",

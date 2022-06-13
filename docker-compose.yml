@@ -17,7 +17,6 @@ services:
     depends_on:
       - db
 
-  # Use root/lush as user/password credentials
   db:
     container_name: lush-db
     build: ./database
