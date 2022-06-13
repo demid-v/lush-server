@@ -1,0 +1,29 @@
+version: "3.8"
+services:
+  server:
+    container_name: lush-server
+    restart: always
+    build: .
+    image: demidv/lush-server
+    environment:
+      - SERVER_PORT=5500
+      - DB_HOST=db
+      - DB_PORT=3307
+      - DB_USER=root
+      - DB_PASSWORD=lush
+      - DB_DATABASE=lush
+    ports:
+      - "5500:5500"
+    depends_on:
+      - db
+
+  # Use root/lush as user/password credentials
+  db:
+    container_name: lush-db
+    build: ./database
+    image: demidv/lush-db
+    environment:
+      - MYSQL_TCP_PORT=3307
+      - MYSQL_ROOT_PASSWORD=lush
+    ports:
+      - "3307:3307"

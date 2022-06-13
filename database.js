@@ -16,7 +16,7 @@ function lushConnectionSuccess() {
 }
 
 function lushConnectionError() {
-  console.error("Connection to the Lush database lost.");
+  throw new Error("Failed to connect to the Lush database.");
 }
 
 module.exports = connection;
