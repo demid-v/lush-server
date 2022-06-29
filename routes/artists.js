@@ -12,8 +12,6 @@ const {
 } = require("../general.js");
 
 router.get("/artists", async (req, res) => {
-  // console.log("Body:", req.body);
-
   const result = await getArtists(req.query);
 
   const artists = {
@@ -37,8 +35,6 @@ async function getArtists({ artistId, search, shuffle, limit, offset }) {
 }
 
 router.get("/artist", async (req, res) => {
-  // console.log("Body:", req.query);
-
   const result = await getArtist(req.query.artistId);
 
   const artist = {
@@ -56,103 +52,6 @@ async function getArtist(artistId) {
 
   return resolveQuery(query);
 }
-
-// async function getArtistData({ artistId, search, shuffle }) {
-//   var artistIdWhereClause = "",
-//     queryWhereClauses = [],
-//     subquery = "",
-//     subqueryWhereClauses = [],
-//     searchQuery = "";
-
-//   const whereClauseDeleted = "artist.deleted = 0";
-//   queryWhereClauses.push(whereClauseDeleted);
-//   subqueryWhereClauses.push(whereClauseDeleted);
-
-//   if (search) {
-//     searchQuery = `
-//     (
-//       artist.name COLLATE utf8mb4_0900_ai_ci LIKE "%${search}%"
-//     )`;
-
-//     queryWhereClauses.push(searchQuery);
-//     subqueryWhereClauses.push(searchQuery);
-//   }
-
-//   var orderBy;
-//   if (shuffle) {
-//     orderBy = "RAND()";
-//   } else if (artistId) {
-//     artistIdWhereClause = `
-//     artist.id = ${artistId}
-//     `;
-
-//     queryWhereClauses.push(artistIdWhereClause);
-
-//     orderBy = "artist.id DESC";
-//   } else {
-//     const subqueryWhereClause = constructWhereClause(subqueryWhereClauses);
-
-//     subquery = `
-//     artist.id <=
-//     (
-//       SELECT artist.id
-//       FROM artist
-//       ${subqueryWhereClause}
-//       ORDER BY artist.id DESC
-//       LIMIT 1
-//     )`;
-
-//     queryWhereClauses.push(subquery);
-
-//     orderBy = "artist.id DESC";
-//   }
-
-//   const queryWhereClause = constructWhereClause(queryWhereClauses);
-
-//   const query = `
-//   SELECT artist.id AS artist_id, artist.name AS artist_name,
-//   artistimage_b.image_id AS artist_image_id, artistimage_b.r, artistimage_b.g, artistimage_b.b,
-//   domain.id AS artist_domain_id, domain.name AS artist_domain_name, genre_top.genre_id AS genre_id, genre_top.genre_name AS genre_name
-//   FROM (
-//     SELECT id, name
-//     FROM artist
-//     ${queryWhereClause}
-//     ORDER BY ${orderBy}
-//     LIMIT 1
-//     ) AS artist
-
-//   LEFT JOIN image_artist_b
-//   ON artist.id = image_artist_b.artist_id
-//   AND is_cover = 1
-//   LEFT JOIN artistimage_b
-//   ON artistimage_b.id = image_artist_b.image_id
-//   LEFT JOIN domain
-//   ON artistimage_b.domain_id = domain.id
-
-//   LEFT JOIN (
-// 	  SELECT artist.id AS artist_id, genre.id AS genre_id, genre.name AS genre_name, COUNT(genre.id) AS genre_count
-// 	  FROM artist
-//       LEFT JOIN audio_artist
-//       ON artist.id = audio_artist.artist_id
-//       AND artist.id = ${artistId}
-//       LEFT JOIN audio
-//       ON audio_artist.audio_id = audio.id
-//       LEFT JOIN audio_genre
-// 	  ON audio.id = audio_genre.audio_id
-//       LEFT JOIN genre
-//       ON audio_genre.genre_id = genre.id
-
-//       GROUP BY genre.id
-//       ORDER BY genre_count DESC
-//       LIMIT 5
-//   ) AS genre_top
-//   ON artist.id = genre_top.artist_id
-//   ;`;
-
-//   // console.log(query);
-
-//   return await resolveQuery(query);
-// }
 
 router.post("/submitArtist", async function (req, res) {
   const artistMetadata = JSON.parse(req.body.artistMetadata);

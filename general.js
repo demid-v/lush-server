@@ -90,6 +90,7 @@ function constructWhereClause(whereClauses, conj = "AND", is_part) {
   if (whereClauses.length < 1) return "";
 
   const whereClausesJoined = whereClauses.join(` ${conj} `);
+
   if (is_part) return `(${whereClausesJoined})`;
   else return "WHERE " + whereClausesJoined;
 }

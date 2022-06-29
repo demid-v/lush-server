@@ -24,46 +24,81 @@ router.get("/tracks", async function (req, res) {
   res.send(tracks);
 });
 
-async function getTracks({ search, genres, shuffle, limit, offset }) {
-  if (search == null) {
-    search = "";
+async function getTracks({ limit, offset, search, artistId, genres, shuffle }) {
+  let artistIdClause = "";
+  let joinClauses = "";
+  let whereClause = "";
+
+  if (artistId != null) {
+    artistIdClause = `AND artist.id = ${artistId}`;
+  }
+
+  if (search != null) {
+    whereClause = `WHERE CONCAT(artist.name, ' ', track.title) COLLATE utf8mb4_0900_ai_ci LIKE '%${search}%'`;
+  }
+
+  if (genres && genres.length !== 0) {
+    joinClauses += `
+    LEFT JOIN track_genre_rel ON track.id = track_genre_rel.track_id
+    LEFT JOIN genre ON track_genre_rel.genre_id = genre.id AND 
+    `;
+
+    if (genres.length === 1) {
+      joinClauses += `genre.name = '${genres[0]}'`;
+    } else {
+      joinClauses += `(genre.name = '${genres[0]}' OR `;
+      for (let i = 1; i < genres.length - 1; i++) {
+        joinClauses += `genre.name = '${genres[i]}' OR `;
+      }
+      joinClauses += `genre.name = '${genres[genres.length - 1]}')`;
+    }
   }
 
   const query = `
-  CALL get_tracks(${limit}, ${offset}, "${search}")
-  ;`;
-
-  return resolveQuery(query);
-}
-
-router.get("/artistTracks", async function (req, res) {
-  console.log("Body:", req.query);
-
-  const result = await getArtistTracks(req.query);
-
-  const tracks = {
-    status: result.error || 200,
-    tracks: result.data,
-  };
-
-  res.send(tracks);
-});
-
-async function getArtistTracks({
-  artistId,
-  search,
-  genres,
-  shuffle,
-  limit,
-  offset,
-}) {
-  if (search == null) {
-    search = "";
-  }
-
-  const query = `
-  CALL get_tracks_for_artist(${artistId}, ${limit}, ${offset}, "${search}")
-  ;`;
+  SELECT track.id AS track_id, track.title AS track_title, track.duration AS duration, artist.id AS artist_id, artist.name AS artist_name, 
+  artist_position, genre.id AS genre_id, genre.name AS genre_name, track_genre_rel.genre_position AS genre_position, track.youtube_video_id, 
+  artist_image.image_id, domain.id AS domain_id, domain.name AS domain_name, album.id AS album_id, album.title AS album_title, 
+  album_image.image_id AS album_image_id, album_domain.id AS album_domain_id, album_domain.name AS album_domain_name
+    
+	FROM (
+		SELECT track.id
+        
+		FROM track
+        
+		LEFT JOIN track_artist_rel ON track.id = track_artist_rel.track_id
+		LEFT JOIN artist ON track_artist_rel.artist_id = artist.id AND artist.deleted = 0 ${artistIdClause}
+    ${joinClauses}
+        
+    ${whereClause}
+    
+		GROUP BY track.id
+		ORDER BY ${shuffle ? "RAND()" : "track.id DESC"}
+		LIMIT ${limit}
+    OFFSET ${offset}
+	) AS track_selected
+    
+  LEFT JOIN track ON track_selected.id = track.id
+	LEFT JOIN track_artist_rel ON track_selected.id = track_artist_rel.track_id
+	LEFT JOIN artist ON track_artist_rel.artist_id = artist.id
+	LEFT JOIN artist_image_rel ON artist.id = artist_image_rel.artist_id AND artist_image_rel.is_cover = 1
+	LEFT JOIN artist_image ON artist_image_rel.image_id = artist_image.id
+	LEFT JOIN domain ON artist_image.domain_id = domain.id
+    
+	LEFT JOIN track_genre_rel ON track_selected.id = track_genre_rel.track_id
+	LEFT JOIN genre ON track_genre_rel.genre_id = genre.id AND genre.deleted = 0
+    
+	LEFT JOIN track_album_rel ON track_selected.id = track_album_rel.track_id
+	LEFT JOIN album ON track_album_rel.album_id = album.id
+	LEFT JOIN album_image_rel ON album.id = album_image_rel.album_id AND album_image_rel.is_cover = 1
+	LEFT JOIN album_image ON album_image_rel.image_id = album_image.id
+	LEFT JOIN domain AS album_domain ON album_image.domain_id = album_domain.id
+    
+	LEFT JOIN track_playlist_rel ON track_selected.id = track_playlist_rel.track_id
+	LEFT JOIN playlist ON track_playlist_rel.playlist_id = playlist.id
+    
+	ORDER BY track.id DESC
+  ;
+  `;
 
   return resolveQuery(query);
 }
